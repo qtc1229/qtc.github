@@ -70,6 +70,11 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
           </div>
         </div>
         <div>
+          <label class="text-xs text-gray-400 block mb-1">物品名称</label>
+          <input id="sc-name" type="text" value="机箱" placeholder="扫码自动填入或手动输入"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+        </div>
+        <div>
           <label class="text-xs text-gray-400 block mb-1">选择排</label>
           <select id="sc-row" onchange="refreshScLayer()" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-blue-400">
             <option value="">-- 请选择排 --</option>
@@ -213,11 +218,11 @@ function addLayer(rowId,name){const r=db.rows.find(r=>r.id===rowId);if(!r)return
 function delLayer(rowId,lid){const r=db.rows.find(r=>r.id===rowId);if(r){r.layers=r.layers.filter(l=>l.id!==lid);save();}}
 function updLayer(rowId,lid,name){const r=db.rows.find(r=>r.id===rowId);if(!r)return;const l=r.layers.find(l=>l.id===lid);if(l){l.name=name;save();}}
 
-function addItem(rowId,layerId,sn,notes=''){
+function addItem(rowId,layerId,sn,notes='',itemName='机箱'){
   const r=db.rows.find(r=>r.id===rowId);if(!r)return null;
   const l=r.layers.find(l=>l.id===layerId);if(!l)return null;
   if(allItems().find(e=>e.item.serialNumber===sn))return'dup';
-  const item={id:uid(),serialNumber:sn,name:'机箱',notes,createdAt:now(),updatedAt:now()};
+  const item={id:uid(),serialNumber:sn,name:itemName,notes,createdAt:now(),updatedAt:now()};
   l.items.push(item);save();return item;
 }
 function delItem(rowId,lid,iid){const r=db.rows.find(r=>r.id===rowId);if(!r)return;const l=r.layers.find(l=>l.id===lid);if(l){l.items=l.items.filter(i=>i.id!==iid);save();}}
@@ -465,6 +470,11 @@ function addItemModal(rowId,lid){
         class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-blue-400">
     </div>
     <div>
+      <label class="text-xs text-gray-400 block mb-1">物品名称</label>
+      <input id="m-nm" type="text" value="机箱" placeholder="如：兼容电脑主机"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+    </div>
+    <div>
       <label class="text-xs text-gray-400 block mb-1">备注（可选）</label>
       <input id="m-nt" type="text" placeholder="可留空"
         class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
@@ -475,9 +485,10 @@ function addItemModal(rowId,lid){
 }
 function submitAddItem(rowId,lid){
   const sn=document.getElementById('m-sn').value.trim();
+  const nm=document.getElementById('m-nm').value.trim()||'机箱';
   const nt=document.getElementById('m-nt').value.trim();
   if(!sn){toast('请输入序列号','err');return;}
-  const r=addItem(rowId,lid,sn,nt);
+  const r=addItem(rowId,lid,sn,nt,nm);
   if(r==='dup'){toast('该序列号已存在！','err');return;}
   closeModal();renderInv();toast('添加成功');
 }
@@ -493,6 +504,11 @@ function editItemModal(rowId,lid,iid){
       <label class="text-xs text-gray-400 block mb-1">序列号</label>
       <input id="m-esn" type="text" value="${esc(item.serialNumber)}"
         class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-blue-400">
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">物品名称</label>
+      <input id="m-enm" type="text" value="${esc(item.name||'机箱')}" placeholder="如：兼容电脑主机"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
     </div>
     <div>
       <label class="text-xs text-gray-400 block mb-1">移至（排）</label>
@@ -519,6 +535,7 @@ function refreshEditLayer(origRow,origLid){
 }
 function submitEditItem(origRowId,origLid,iid){
   const sn=document.getElementById('m-esn').value.trim();
+  const nm=document.getElementById('m-enm').value.trim()||'机箱';
   const newRowId=document.getElementById('m-er').value;
   const newLid=document.getElementById('m-el').value;
   const nt=document.getElementById('m-ent').value.trim();
@@ -527,9 +544,9 @@ function submitEditItem(origRowId,origLid,iid){
   const dup=allItems().find(e=>e.item.serialNumber===sn&&e.item.id!==iid);
   if(dup){toast('该序列号已存在！','err');return;}
   if(newRowId===origRowId&&newLid===origLid){
-    updItem(origRowId,origLid,iid,{serialNumber:sn,notes:nt});
+    updItem(origRowId,origLid,iid,{serialNumber:sn,name:nm,notes:nt});
   } else {
-    updItem(origRowId,origLid,iid,{serialNumber:sn,notes:nt});
+    updItem(origRowId,origLid,iid,{serialNumber:sn,name:nm,notes:nt});
     const sr=db.rows.find(r=>r.id===origRowId);
     const sl=sr&&sr.layers.find(l=>l.id===origLid);
     if(sl){
@@ -565,6 +582,24 @@ function execDelItem(rowId,lid,iid){delItem(rowId,lid,iid);closeModal();renderIn
 // ── SCANNER ───────────────────────────────────────────────
 let qr=null;
 
+// 解析二维码内容，支持多行 "字段:值" 格式
+// 示例：资产编号:L001-100808903\n资产名称:兼容电脑主机
+function parseQR(text){
+  const lines=text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  let sn=text.trim();
+  let name='机箱';
+  if(lines.length>1){
+    for(const line of lines){
+      // 同时支持半角冒号和全角冒号
+      const snM=line.match(/资产编号\s*[：:]\s*(.+)/);
+      const nmM=line.match(/资产名称\s*[：:]\s*(.+)/);
+      if(snM)sn=snM[1].trim();
+      if(nmM)name=nmM[1].trim();
+    }
+  }
+  return{sn,name};
+}
+
 function refreshScSelects(){
   const rs=document.getElementById('sc-row');
   rs.innerHTML='<option value="">-- 请选择排 --</option>'+db.rows.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
@@ -582,8 +617,10 @@ function startScan(){
   if(qr.isScanning)return;
   qr.start({facingMode:'environment'},{fps:10,qrbox:{width:240,height:240}},
     (text)=>{
-      document.getElementById('sc-serial').value=text;
-      document.getElementById('scan-result-val').textContent=text;
+      const parsed=parseQR(text);
+      document.getElementById('sc-serial').value=parsed.sn;
+      document.getElementById('sc-name').value=parsed.name;
+      document.getElementById('scan-result-val').textContent=`编号: ${parsed.sn}  名称: ${parsed.name}`;
       document.getElementById('scan-result-bar').classList.remove('hidden');
       stopScan();toast('扫码成功');
     },()=>{}
@@ -592,15 +629,17 @@ function startScan(){
 function stopScan(){if(qr&&qr.isScanning)qr.stop().catch(()=>{});}
 function submitScanEntry(){
   const sn=document.getElementById('sc-serial').value.trim();
+  const name=document.getElementById('sc-name').value.trim()||'机箱';
   const rowId=document.getElementById('sc-row').value;
   const lid=document.getElementById('sc-layer').value;
   const nt=document.getElementById('sc-notes').value.trim();
   if(!sn){toast('请输入或扫描序列号','err');return;}
   if(!rowId){toast('请选择排','err');return;}
   if(!lid){toast('请选择层','err');return;}
-  const r=addItem(rowId,lid,sn,nt);
+  const r=addItem(rowId,lid,sn,nt,name);
   if(r==='dup'){toast('该序列号已存在！','err');return;}
   document.getElementById('sc-serial').value='';
+  document.getElementById('sc-name').value='机箱';
   document.getElementById('sc-notes').value='';
   document.getElementById('scan-result-bar').classList.add('hidden');
   toast('录入成功');
