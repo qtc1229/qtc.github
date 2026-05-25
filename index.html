@@ -8,6 +8,7 @@
 <title>机箱库存管理</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{-webkit-tap-highlight-color:transparent;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;overscroll-behavior:none;background:#f3f4f6}
@@ -30,6 +31,11 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
     <span id="hd-count" class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">0 台</span>
   </div>
 </header>
+
+<!-- Storage Warning -->
+<div id="storage-warn" class="hidden bg-red-600 text-white text-xs px-4 py-2 text-center">
+  ⚠ 本地存储不可用（请勿使用无痕/隐私模式），数据将在刷新后丢失
+</div>
 
 <!-- Content -->
 <main class="flex-1 overflow-auto pb-20">
@@ -75,7 +81,7 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
             class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
         </div>
         <div>
-          <label class="text-xs text-gray-400 block mb-1">选择排</label>
+          <label class="text-xs text-gray-400 block mb-1">选择排 <span class="text-gray-300">（从前往后数）</span></label>
           <select id="sc-row" onchange="refreshScLayer()" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-blue-400">
             <option value="">-- 请选择排 --</option>
           </select>
@@ -85,6 +91,11 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
           <select id="sc-layer" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-blue-400">
             <option value="">-- 请先选择排 --</option>
           </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 block mb-1">第几台 <span class="text-gray-300">（从右往左数）</span></label>
+          <input id="sc-pos" type="number" min="1" placeholder="输入台号，如 3"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
         </div>
         <div>
           <label class="text-xs text-gray-400 block mb-1">备注（可选）</label>
@@ -123,6 +134,19 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
         </div>
       </div>
 
+      <div class="bg-white rounded-xl shadow-sm p-4">
+        <div class="flex items-center justify-between">
+          <p class="text-sm font-medium text-gray-700">云端同步</p>
+          <span id="cloud-status" class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">未配置</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">配置 Supabase 免费项目后，可在手机和电脑之间同步同一份库存。</p>
+        <div class="grid grid-cols-3 gap-2 mt-3">
+          <button onclick="showCloudConfigModal()" class="py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium">配置</button>
+          <button onclick="pullCloudNow()" class="py-2 bg-gray-50 text-gray-700 border border-gray-200 rounded-lg text-xs font-medium">读取</button>
+          <button onclick="pushCloudNow()" class="py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium">上传</button>
+        </div>
+      </div>
+
       <div class="bg-white rounded-xl shadow-sm p-4 space-y-3">
         <p class="text-sm font-medium text-gray-700">批量导入序列号</p>
         <div>
@@ -141,6 +165,11 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
           <label class="text-xs text-gray-400 block mb-1">序列号（每行一个）</label>
           <textarea id="bt-serials" rows="5" placeholder="123456&#10;123457&#10;123458"
             class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm font-mono resize-none focus:outline-none focus:border-blue-400"></textarea>
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 block mb-1">从第几个开始 <span class="text-gray-300">（可选）</span></label>
+          <input id="bt-start-pos" type="number" min="1" placeholder="如 1，导入后自动递增"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
         </div>
         <button onclick="doBatchImport()" class="w-full bg-green-600 text-white py-3 rounded-xl text-sm font-medium">批量导入</button>
       </div>
@@ -200,10 +229,199 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
 <script>
 // ── DATA ──────────────────────────────────────────────────
 const KEY = 'chassis_v1';
+const CLOUD_CONFIG_KEY = 'chassis_cloud_config_v1';
 let db = {rows:[]};
+const CLOUD = {
+  supabaseUrl: 'https://dgscqhlrzuexqvyutpap.supabase.co',
+  supabaseAnonKey: 'sb_publishable_4O7dw6cfDA_IRc1Kpkkn6A_BUyNoRA0',
+  table: 'inventory_state',
+  docId: 'default'
+};
+let cloudClient = null;
+let cloudReady = false;
+let cloudTimer = null;
 
-function load(){try{const s=localStorage.getItem(KEY);if(s)db=JSON.parse(s);}catch(e){db={rows:[]};}}
-function save(){localStorage.setItem(KEY,JSON.stringify(db));refreshStats();}
+function storageOK(){try{localStorage.setItem('__chk','1');localStorage.removeItem('__chk');return true;}catch(e){return false;}}
+function load(){
+  if(!storageOK()){showStorageWarn();return;}
+  try{const s=localStorage.getItem(KEY);if(s)db=JSON.parse(s);}catch(e){db={rows:[]};}
+}
+function loadCloudConfig(){
+  if(!storageOK())return;
+  try{
+    const s=localStorage.getItem(CLOUD_CONFIG_KEY);
+    if(s)Object.assign(CLOUD,JSON.parse(s));
+  }catch(e){}
+}
+function saveLocalOnly(){
+  if(!storageOK()){showStorageWarn();return;}
+  try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){showStorageWarn();}
+}
+function save(){
+  saveLocalOnly();
+  queueCloudSave();
+  refreshStats();
+}
+function showStorageWarn(){
+  const el=document.getElementById('storage-warn');
+  if(el)el.classList.remove('hidden');
+}
+function cloudConfigured(){
+  return CLOUD.supabaseUrl&&CLOUD.supabaseAnonKey&&window.supabase;
+}
+function createCloudClient(){
+  if(!cloudConfigured())return null;
+  if(!cloudClient)cloudClient=window.supabase.createClient(CLOUD.supabaseUrl,CLOUD.supabaseAnonKey);
+  return cloudClient;
+}
+function setCloudStatus(text,type='idle'){
+  const el=document.getElementById('cloud-status');if(!el)return;
+  el.textContent=text;
+  el.className='text-xs px-2 py-1 rounded-full '+(type==='ok'?'text-green-700 bg-green-50':type==='err'?'text-red-600 bg-red-50':type==='sync'?'text-blue-700 bg-blue-50':'text-gray-400 bg-gray-100');
+}
+async function initCloud(){
+  if(!cloudConfigured()){setCloudStatus('未配置');return;}
+  try{
+    setCloudStatus('同步中','sync');
+    createCloudClient();
+    const {data,error}=await cloudClient.from(CLOUD.table).select('data').eq('id',CLOUD.docId).maybeSingle();
+    if(error)throw error;
+    if(data&&data.data&&Array.isArray(data.data.rows)){
+      if(db.rows.length&&data.data.rows.length===0){
+        cloudReady=true;
+        await saveCloudNow();
+        setCloudStatus('已同步','ok');
+        return;
+      }
+      db=data.data;
+      saveLocalOnly();
+      renderInv();
+      refreshStats();
+    }else{
+      await saveCloudNow();
+    }
+    cloudReady=true;
+    setCloudStatus('已同步','ok');
+  }catch(e){
+    console.warn(e);
+    setCloudStatus('同步失败','err');
+    toast('云端同步失败，已使用本地数据','err');
+  }
+}
+function showCloudConfigModal(){
+  showModal('云端同步配置',`<div class="space-y-3">
+    <div class="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-800 leading-5">
+      <p>使用 Supabase 免费项目。配置会保存在本机浏览器，换设备时也需要填一次。</p>
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">Project URL</label>
+      <input id="m-cloud-url" type="text" value="${esc(CLOUD.supabaseUrl)}" placeholder="https://xxxx.supabase.co"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">anon public key</label>
+      <input id="m-cloud-key" type="text" value="${esc(CLOUD.supabaseAnonKey)}" placeholder="eyJ..."
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">同步文档 ID</label>
+      <input id="m-cloud-doc" type="text" value="${esc(CLOUD.docId||'default')}" placeholder="default"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <button onclick="showCloudSqlModal()" class="py-3 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl text-sm font-medium">建表 SQL</button>
+      <button onclick="saveCloudConfig()" class="py-3 bg-blue-600 text-white rounded-xl text-sm font-medium">保存配置</button>
+    </div>
+    <button onclick="clearCloudConfig()" class="w-full py-3 bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-medium">清除配置</button>
+  </div>`);
+}
+function showCloudSqlModal(){
+  showModal('Supabase 建表 SQL',`<div class="space-y-3">
+    <textarea readonly rows="18" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-xs font-mono resize-none">create table if not exists inventory_state (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz default now()
+);
+
+alter table inventory_state enable row level security;
+
+drop policy if exists inventory_state_select on inventory_state;
+drop policy if exists inventory_state_insert on inventory_state;
+drop policy if exists inventory_state_update on inventory_state;
+drop policy if exists inventory_state_delete on inventory_state;
+
+create policy inventory_state_select on inventory_state for select to anon, authenticated using (true);
+create policy inventory_state_insert on inventory_state for insert to anon, authenticated with check (true);
+create policy inventory_state_update on inventory_state for update to anon, authenticated using (true) with check (true);
+create policy inventory_state_delete on inventory_state for delete to anon, authenticated using (true);
+
+grant select, insert, update, delete on table inventory_state to anon, authenticated;</textarea>
+    <button onclick="showCloudConfigModal()" class="w-full py-3 bg-blue-600 text-white rounded-xl text-sm font-medium">返回配置</button>
+  </div>`);
+}
+function saveCloudConfig(){
+  const url=document.getElementById('m-cloud-url').value.trim();
+  const key=document.getElementById('m-cloud-key').value.trim();
+  const docId=document.getElementById('m-cloud-doc').value.trim()||'default';
+  if(!url||!key){toast('请填写 URL 和 anon key','err');return;}
+  Object.assign(CLOUD,{supabaseUrl:url,supabaseAnonKey:key,docId});
+  localStorage.setItem(CLOUD_CONFIG_KEY,JSON.stringify(CLOUD));
+  cloudClient=null;cloudReady=false;
+  closeModal();
+  initCloud();
+  toast('云端配置已保存');
+}
+function clearCloudConfig(){
+  localStorage.removeItem(CLOUD_CONFIG_KEY);
+  Object.assign(CLOUD,{supabaseUrl:'',supabaseAnonKey:'',table:'inventory_state',docId:'default'});
+  cloudClient=null;cloudReady=false;
+  setCloudStatus('未配置');
+  closeModal();
+  toast('已清除云端配置');
+}
+function queueCloudSave(){
+  if(!cloudReady||!cloudClient)return;
+  setCloudStatus('保存中','sync');
+  clearTimeout(cloudTimer);
+  cloudTimer=setTimeout(saveCloudNow,600);
+}
+async function saveCloudNow(){
+  if(!createCloudClient())return;
+  const {error}=await cloudClient.from(CLOUD.table).upsert({
+    id:CLOUD.docId,
+    data:db,
+    updated_at:new Date().toISOString()
+  });
+  if(error){setCloudStatus('保存失败','err');console.warn(error);return;}
+  setCloudStatus('已同步','ok');
+}
+async function pullCloudNow(){
+  if(!cloudConfigured()){toast('请先配置云端','err');showCloudConfigModal();return;}
+  try{
+    setCloudStatus('读取中','sync');
+    createCloudClient();
+    const {data,error}=await cloudClient.from(CLOUD.table).select('data').eq('id',CLOUD.docId).maybeSingle();
+    if(error)throw error;
+    if(!data||!data.data){toast('云端还没有数据，可先上传本地数据','err');setCloudStatus('无云端数据','err');return;}
+    db=data.data;
+    saveLocalOnly();
+    renderInv();
+    refreshStats();
+    cloudReady=true;
+    setCloudStatus('已同步','ok');
+    toast('已从云端读取');
+  }catch(e){console.warn(e);setCloudStatus('读取失败','err');toast('云端读取失败','err');}
+}
+async function pushCloudNow(){
+  if(!cloudConfigured()){toast('请先配置云端','err');showCloudConfigModal();return;}
+  try{
+    setCloudStatus('上传中','sync');
+    createCloudClient();
+    await saveCloudNow();
+    cloudReady=true;
+    toast('已上传到云端');
+  }catch(e){console.warn(e);setCloudStatus('上传失败','err');toast('云端上传失败','err');}
+}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 function now(){return new Date().toISOString();}
 function fmtDate(s){if(!s)return'-';const d=new Date(s);return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;}
@@ -218,11 +436,11 @@ function addLayer(rowId,name){const r=db.rows.find(r=>r.id===rowId);if(!r)return
 function delLayer(rowId,lid){const r=db.rows.find(r=>r.id===rowId);if(r){r.layers=r.layers.filter(l=>l.id!==lid);save();}}
 function updLayer(rowId,lid,name){const r=db.rows.find(r=>r.id===rowId);if(!r)return;const l=r.layers.find(l=>l.id===lid);if(l){l.name=name;save();}}
 
-function addItem(rowId,layerId,sn,notes='',itemName='机箱'){
+function addItem(rowId,layerId,sn,notes='',itemName='机箱',position=''){
   const r=db.rows.find(r=>r.id===rowId);if(!r)return null;
   const l=r.layers.find(l=>l.id===layerId);if(!l)return null;
   if(allItems().find(e=>e.item.serialNumber===sn))return'dup';
-  const item={id:uid(),serialNumber:sn,name:itemName,notes,createdAt:now(),updatedAt:now()};
+  const item={id:uid(),serialNumber:sn,name:itemName,position,notes,createdAt:now(),updatedAt:now()};
   l.items.push(item);save();return item;
 }
 function delItem(rowId,lid,iid){const r=db.rows.find(r=>r.id===rowId);if(!r)return;const l=r.layers.find(l=>l.id===lid);if(l){l.items=l.items.filter(i=>i.id!==iid);save();}}
@@ -251,6 +469,10 @@ function stats(){let la=0,it=0;db.rows.forEach(r=>{la+=r.layers.length;r.layers.
 
 // ── UI HELPERS ─────────────────────────────────────────────
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function positionText(pos){return pos?`第${esc(pos)}个`:'';}
+function locationText(row,layer,item){
+  return [row&&row.name,layer&&layer.name,positionText(item&&item.position)].filter(Boolean).map(esc).join(' > ');
+}
 
 let _toastTimer=null;
 function toast(msg,type='ok'){
@@ -348,10 +570,14 @@ function renderLayer(rowId,layer){
 </div>`;}
 
 function renderItem(rowId,lid,item){
+  const row=db.rows.find(r=>r.id===rowId);
+  const layer=row&&row.layers.find(l=>l.id===lid);
+  const loc=locationText(row,layer,item);
   return`<div class="border border-gray-100 rounded-lg p-3 flex items-start justify-between bg-white fade-in" id="I${item.id}">
   <div class="flex-1 min-w-0">
     <div class="font-mono text-sm text-gray-800">${esc(item.serialNumber)}</div>
-    <div class="text-xs text-gray-400 mt-0.5">${esc(item.name)}${item.notes?' · '+esc(item.notes):''}</div>
+    <div class="text-xs text-blue-600 mt-0.5">${loc}</div>
+    <div class="text-xs text-gray-500 mt-0.5">${esc(item.name)}${item.notes?' · '+esc(item.notes):''}</div>
     <div class="text-xs text-gray-300 mt-0.5">编辑: ${fmtDate(item.updatedAt)}</div>
   </div>
   <div class="flex gap-1 ml-2 shrink-0">
@@ -475,6 +701,11 @@ function addItemModal(rowId,lid){
         class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
     </div>
     <div>
+      <label class="text-xs text-gray-400 block mb-1">要放第几个 <span class="text-gray-300 text-xs font-normal">（从右往左数）</span></label>
+      <input id="m-pos" type="number" min="1" placeholder="输入位置号，如 3"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+    </div>
+    <div>
       <label class="text-xs text-gray-400 block mb-1">备注（可选）</label>
       <input id="m-nt" type="text" placeholder="可留空"
         class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
@@ -486,9 +717,10 @@ function addItemModal(rowId,lid){
 function submitAddItem(rowId,lid){
   const sn=document.getElementById('m-sn').value.trim();
   const nm=document.getElementById('m-nm').value.trim()||'机箱';
+  const pos=document.getElementById('m-pos').value.trim();
   const nt=document.getElementById('m-nt').value.trim();
   if(!sn){toast('请输入序列号','err');return;}
-  const r=addItem(rowId,lid,sn,nt,nm);
+  const r=addItem(rowId,lid,sn,nt,nm,pos);
   if(r==='dup'){toast('该序列号已存在！','err');return;}
   closeModal();renderInv();toast('添加成功');
 }
@@ -511,12 +743,17 @@ function editItemModal(rowId,lid,iid){
         class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
     </div>
     <div>
-      <label class="text-xs text-gray-400 block mb-1">移至（排）</label>
+      <label class="text-xs text-gray-400 block mb-1">移至（排） <span class="text-gray-300 text-xs font-normal">（从前往后数）</span></label>
       <select id="m-er" onchange="refreshEditLayer('${rowId}','${lid}')" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-blue-400">${rowOpts}</select>
     </div>
     <div>
       <label class="text-xs text-gray-400 block mb-1">移至（层）</label>
       <select id="m-el" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-blue-400">${layOpts}</select>
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">要放第几个 <span class="text-gray-300 text-xs font-normal">（从右往左数）</span></label>
+      <input id="m-epos" type="number" min="1" value="${esc(item.position||'')}" placeholder="输入位置号，如 3"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
     </div>
     <div>
       <label class="text-xs text-gray-400 block mb-1">备注</label>
@@ -538,15 +775,16 @@ function submitEditItem(origRowId,origLid,iid){
   const nm=document.getElementById('m-enm').value.trim()||'机箱';
   const newRowId=document.getElementById('m-er').value;
   const newLid=document.getElementById('m-el').value;
+  const pos=document.getElementById('m-epos').value.trim();
   const nt=document.getElementById('m-ent').value.trim();
   if(!sn){toast('序列号不能为空','err');return;}
   if(!newLid){toast('请选择层','err');return;}
   const dup=allItems().find(e=>e.item.serialNumber===sn&&e.item.id!==iid);
   if(dup){toast('该序列号已存在！','err');return;}
   if(newRowId===origRowId&&newLid===origLid){
-    updItem(origRowId,origLid,iid,{serialNumber:sn,name:nm,notes:nt});
+    updItem(origRowId,origLid,iid,{serialNumber:sn,name:nm,position:pos,notes:nt});
   } else {
-    updItem(origRowId,origLid,iid,{serialNumber:sn,name:nm,notes:nt});
+    updItem(origRowId,origLid,iid,{serialNumber:sn,name:nm,position:pos,notes:nt});
     const sr=db.rows.find(r=>r.id===origRowId);
     const sl=sr&&sr.layers.find(l=>l.id===origLid);
     if(sl){
@@ -632,14 +870,16 @@ function submitScanEntry(){
   const name=document.getElementById('sc-name').value.trim()||'机箱';
   const rowId=document.getElementById('sc-row').value;
   const lid=document.getElementById('sc-layer').value;
+  const pos=document.getElementById('sc-pos').value.trim();
   const nt=document.getElementById('sc-notes').value.trim();
   if(!sn){toast('请输入或扫描序列号','err');return;}
   if(!rowId){toast('请选择排','err');return;}
   if(!lid){toast('请选择层','err');return;}
-  const r=addItem(rowId,lid,sn,nt,name);
+  const r=addItem(rowId,lid,sn,nt,name,pos);
   if(r==='dup'){toast('该序列号已存在！','err');return;}
   document.getElementById('sc-serial').value='';
   document.getElementById('sc-name').value='机箱';
+  document.getElementById('sc-pos').value='';
   document.getElementById('sc-notes').value='';
   document.getElementById('scan-result-bar').classList.add('hidden');
   toast('录入成功');
@@ -663,7 +903,7 @@ function doSearch(){
         <div class="flex-1">
           <div class="font-mono font-medium text-gray-800">${hlMatch(e.item.serialNumber,q)}</div>
           <div class="text-sm text-gray-500 mt-1">${esc(e.item.name)}</div>
-          <div class="text-sm text-blue-600 mt-0.5">${esc(e.row.name)} &gt; ${esc(e.layer.name)}</div>
+          <div class="text-sm text-blue-600 mt-0.5">${locationText(e.row,e.layer,e.item)}</div>
           ${e.item.notes?`<div class="text-xs text-gray-400 mt-0.5">备注: ${esc(e.item.notes)}</div>`:''}
           <div class="text-xs text-gray-300 mt-1">最后编辑: ${fmtDate(e.item.updatedAt)}</div>
         </div>
@@ -701,13 +941,20 @@ function doBatchImport(){
   const rowId=document.getElementById('bt-row').value;
   const lid=document.getElementById('bt-layer').value;
   const txt=document.getElementById('bt-serials').value.trim();
+  const startPos=document.getElementById('bt-start-pos').value.trim();
   if(!rowId){toast('请选择排','err');return;}
   if(!lid){toast('请选择层','err');return;}
   if(!txt){toast('请输入序列号','err');return;}
+  if(startPos&&Number(startPos)<1){toast('起始位置必须大于 0','err');return;}
   const sns=txt.split('\n').map(s=>s.trim()).filter(Boolean);
   let added=0,dup=0;
-  sns.forEach(sn=>{const r=addItem(rowId,lid,sn);if(r==='dup')dup++;else if(r)added++;});
+  sns.forEach((sn,idx)=>{
+    const pos=startPos?String(Number(startPos)+idx):'';
+    const r=addItem(rowId,lid,sn,'','机箱',pos);
+    if(r==='dup')dup++;else if(r)added++;
+  });
   document.getElementById('bt-serials').value='';
+  document.getElementById('bt-start-pos').value='';
   toast(`导入完成：添加 ${added} 个，跳过重复 ${dup} 个`);
 }
 function doExport(){
@@ -763,8 +1010,10 @@ function execReset(){
 
 // ── INIT ──────────────────────────────────────────────────
 load();
+loadCloudConfig();
 renderInv();
 refreshStats();
+initCloud();
 </script>
 </body>
 </html>
