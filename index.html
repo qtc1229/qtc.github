@@ -45,7 +45,10 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
     <div class="p-4">
       <div class="flex items-center justify-between mb-3">
         <span class="text-sm font-medium text-gray-600">排 / 层 / 序列号</span>
-        <button onclick="showAddRowModal()" class="bg-blue-600 text-white text-sm px-3 py-1.5 rounded-lg font-medium">+ 新增排</button>
+        <div class="flex gap-2">
+          <button onclick="showQuickAddItemModal()" class="bg-green-600 text-white text-sm px-3 py-1.5 rounded-lg font-medium">+ 新增机箱</button>
+          <button onclick="showAddRowModal()" class="bg-blue-600 text-white text-sm px-3 py-1.5 rounded-lg font-medium">+ 新增排</button>
+        </div>
       </div>
       <div id="rows-container"></div>
       <div id="inv-empty" class="hidden text-center py-16 text-gray-400">
@@ -685,6 +688,69 @@ function delLayerConfirm(rowId,lid){
 function execDelLayer(rowId,lid){delLayer(rowId,lid);closeModal();renderInv();toast('已删除','err');}
 
 // ── ITEM MODALS ───────────────────────────────────────────
+function showQuickAddItemModal(){
+  if(!db.rows.length){
+    toast('请先新增排和层','err');
+    showAddRowModal();
+    return;
+  }
+  const rowOpts=db.rows.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
+  const firstRow=db.rows[0];
+  const layOpts=firstRow.layers.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+  showModal('新增机箱',`<div class="space-y-3">
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">选择排 <span class="text-gray-300">（从前往后数）</span></label>
+      <select id="q-row" onchange="refreshQuickLayer()" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-blue-400">${rowOpts}</select>
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">选择层</label>
+      <select id="q-layer" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-blue-400">${layOpts||'<option value="">该排无层</option>'}</select>
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">序列号</label>
+      <input id="q-sn" type="text" placeholder="输入序列号"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-blue-400">
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">物品名称</label>
+      <input id="q-name" type="text" value="机箱" placeholder="如：兼容电脑主机"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">第几台 <span class="text-gray-300 text-xs font-normal">（从右往左数）</span></label>
+      <input id="q-pos" type="number" min="1" placeholder="输入台号，如 3"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+    </div>
+    <div>
+      <label class="text-xs text-gray-400 block mb-1">备注（可选）</label>
+      <input id="q-notes" type="text" placeholder="可留空"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+    </div>
+    <button onclick="submitQuickAddItem()" class="w-full bg-green-600 text-white py-3 rounded-xl text-sm font-medium">保存机箱</button>
+  </div>`);
+  setTimeout(()=>{const e=document.getElementById('q-sn');if(e)e.focus();},80);
+}
+function refreshQuickLayer(){
+  const rowId=document.getElementById('q-row').value;
+  const r=db.rows.find(r=>r.id===rowId);
+  const sel=document.getElementById('q-layer');
+  if(!r){sel.innerHTML='<option value="">请先选择排</option>';return;}
+  sel.innerHTML=r.layers.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('')||'<option value="">该排无层</option>';
+}
+function submitQuickAddItem(){
+  const rowId=document.getElementById('q-row').value;
+  const lid=document.getElementById('q-layer').value;
+  const sn=document.getElementById('q-sn').value.trim();
+  const name=document.getElementById('q-name').value.trim()||'机箱';
+  const pos=document.getElementById('q-pos').value.trim();
+  const notes=document.getElementById('q-notes').value.trim();
+  if(!rowId){toast('请选择排','err');return;}
+  if(!lid){toast('请选择层','err');return;}
+  if(!sn){toast('请输入序列号','err');return;}
+  const r=addItem(rowId,lid,sn,notes,name,pos);
+  if(r==='dup'){toast('该序列号已存在！','err');return;}
+  closeModal();renderInv();toast('添加成功');
+}
 function addItemModal(rowId,lid){
   const r=db.rows.find(r=>r.id===rowId);if(!r)return;
   const l=r.layers.find(l=>l.id===lid);if(!l)return;
