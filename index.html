@@ -11,14 +11,43 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{-webkit-tap-highlight-color:transparent;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;overscroll-behavior:none;background:#f3f4f6}
+:root{--page-bg:#f3f4f6;--panel-bg:#fff;--panel-border:#e5e7eb;--soft-bg:#f9fafb;--text-main:#1f2937;--text-sub:#6b7280;--text-muted:#9ca3af;--nav-bg:#fff;--accent:#2563eb;--accent-2:#16a34a;--danger:#dc2626}
+body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;overscroll-behavior:none;background:var(--page-bg);color:var(--text-main);transition:background .35s ease,color .35s ease}
+body.theme-dark{--page-bg:#05070d;--panel-bg:#111827;--panel-border:#243044;--soft-bg:#0b1120;--text-main:#e5e7eb;--text-sub:#cbd5e1;--text-muted:#94a3b8;--nav-bg:#0b1120;--accent:#60a5fa;--accent-2:#34d399;--danger:#fb7185;color-scheme:dark}
+body.theme-glass{--page-bg:#dce7f7;--panel-bg:rgba(255,255,255,.54);--panel-border:rgba(255,255,255,.58);--soft-bg:rgba(255,255,255,.32);--text-main:#172033;--text-sub:#41516b;--text-muted:#6f7f96;--nav-bg:rgba(255,255,255,.62);--accent:#1473e6;--accent-2:#0f9f6e;--danger:#d92d4b;background:radial-gradient(circle at 14% 8%,rgba(255,255,255,.95),transparent 26%),radial-gradient(circle at 82% 18%,rgba(122,190,255,.72),transparent 34%),linear-gradient(135deg,#eef6ff 0%,#dce7f7 38%,#f7e8ff 100%);background-attachment:fixed}
 #reader video{width:100%!important;border-radius:8px}
 #reader img{display:none}
 .fade-in{animation:fi .15s ease-out}
 @keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .tab-content{display:none}
 .tab-content.active{display:block}
+.tab-content.switch-in{animation:appSwitchIn .32s cubic-bezier(.2,.8,.2,1)}
+.tab-content.switch-out{animation:appSwitchOut .22s cubic-bezier(.4,0,.2,1)}
+@keyframes appSwitchIn{from{opacity:0;transform:translateY(18px) scale(.965);filter:blur(8px)}to{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
+@keyframes appSwitchOut{from{opacity:1;transform:translateY(0) scale(1)}to{opacity:0;transform:translateY(-10px) scale(.985)}}
 mark{background:#fef08a;border-radius:2px;padding:0 1px}
+header,nav,.bg-white{background:var(--panel-bg)!important;border-color:var(--panel-border)!important;color:var(--text-main)!important;transition:background .35s ease,border-color .35s ease,color .35s ease,box-shadow .35s ease}
+nav{background:var(--nav-bg)!important}
+.bg-gray-50,.bg-gray-100{background:var(--soft-bg)!important}
+.text-gray-800,.text-gray-700{color:var(--text-main)!important}
+.text-gray-600,.text-gray-500{color:var(--text-sub)!important}
+.text-gray-400,.text-gray-300{color:var(--text-muted)!important}
+.border-gray-50,.border-gray-100,.border-gray-200{border-color:var(--panel-border)!important}
+input,select,textarea{background:var(--panel-bg)!important;color:var(--text-main)!important;border-color:var(--panel-border)!important}
+input::placeholder,textarea::placeholder{color:var(--text-muted)}
+body.theme-dark .shadow-sm{box-shadow:0 12px 28px rgba(0,0,0,.32)!important}
+body.theme-dark .bg-blue-50{background:rgba(37,99,235,.18)!important}
+body.theme-dark .bg-green-50{background:rgba(16,185,129,.16)!important}
+body.theme-dark .bg-red-50{background:rgba(244,63,94,.16)!important}
+body.theme-glass header,body.theme-glass nav,body.theme-glass .bg-white,body.theme-glass #modal-mask>div{backdrop-filter:blur(24px) saturate(1.55);-webkit-backdrop-filter:blur(24px) saturate(1.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 18px 42px rgba(47,75,118,.16)!important}
+body.theme-glass .shadow-sm{box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 18px 42px rgba(47,75,118,.13)!important}
+body.theme-glass input,body.theme-glass select,body.theme-glass textarea{background:rgba(255,255,255,.5)!important;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.theme-btn{border:1px solid var(--panel-border);background:var(--soft-bg);color:var(--text-sub);transition:transform .18s ease,background .25s ease,color .25s ease,border-color .25s ease,box-shadow .25s ease}
+.theme-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 10px 24px rgba(37,99,235,.24);transform:translateY(-1px)}
+body.theme-glass .theme-btn.active{background:rgba(20,115,230,.78);border-color:rgba(255,255,255,.7);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+nav button{transition:color .22s ease,border-color .22s ease,transform .22s cubic-bezier(.2,.8,.2,1)}
+nav button.text-blue-600{transform:translateY(-2px) scale(1.04)}
+@media (prefers-reduced-motion:reduce){.tab-content.switch-in,.tab-content.switch-out,.fade-in{animation:none!important}nav button,.theme-btn,body,header,nav,.bg-white{transition:none!important}}
 </style>
 </head>
 <body>
@@ -138,6 +167,15 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
       </div>
 
       <div class="bg-white rounded-xl shadow-sm p-4">
+        <p class="text-sm font-medium text-gray-700 mb-3">皮肤切换</p>
+        <div class="grid grid-cols-3 gap-2">
+          <button id="theme-default" onclick="setTheme('default')" class="theme-btn py-2.5 rounded-lg text-xs font-medium">默认</button>
+          <button id="theme-dark" onclick="setTheme('dark')" class="theme-btn py-2.5 rounded-lg text-xs font-medium">黑夜</button>
+          <button id="theme-glass" onclick="setTheme('glass')" class="theme-btn py-2.5 rounded-lg text-xs font-medium">液态玻璃</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm p-4">
         <div class="flex items-center justify-between">
           <p class="text-sm font-medium text-gray-700">云端同步</p>
           <span id="cloud-status" class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">未配置</span>
@@ -233,6 +271,7 @@ mark{background:#fef08a;border-radius:2px;padding:0 1px}
 // ── DATA ──────────────────────────────────────────────────
 const KEY = 'chassis_v1';
 const CLOUD_CONFIG_KEY = 'chassis_cloud_config_v1';
+const THEME_KEY = 'chassis_theme_v1';
 let db = {rows:[]};
 const CLOUD = {
   supabaseUrl: 'https://dgscqhlrzuexqvyutpap.supabase.co',
@@ -243,8 +282,23 @@ const CLOUD = {
 let cloudClient = null;
 let cloudReady = false;
 let cloudTimer = null;
+let currentTheme = 'default';
 
 function storageOK(){try{localStorage.setItem('__chk','1');localStorage.removeItem('__chk');return true;}catch(e){return false;}}
+function loadTheme(){
+  if(!storageOK())return;
+  try{currentTheme=localStorage.getItem(THEME_KEY)||'default';}catch(e){currentTheme='default';}
+}
+function setTheme(theme){
+  currentTheme=['default','dark','glass'].includes(theme)?theme:'default';
+  document.body.classList.remove('theme-dark','theme-glass');
+  if(currentTheme==='dark')document.body.classList.add('theme-dark');
+  if(currentTheme==='glass')document.body.classList.add('theme-glass');
+  document.querySelectorAll('.theme-btn').forEach(b=>b.classList.remove('active'));
+  const btn=document.getElementById('theme-'+currentTheme);
+  if(btn)btn.classList.add('active');
+  if(storageOK())localStorage.setItem(THEME_KEY,currentTheme);
+}
 function load(){
   if(!storageOK()){showStorageWarn();return;}
   try{const s=localStorage.getItem(KEY);if(s)db=JSON.parse(s);}catch(e){db={rows:[]};}
@@ -505,9 +559,21 @@ let scanner=null;
 
 function gotoTab(tab){
   if(activeTab==='scanner'&&tab!=='scanner')stopScan();
+  if(activeTab===tab)return;
+  const prev=document.getElementById('tab-'+activeTab);
+  if(prev){
+    prev.classList.remove('switch-in');
+    prev.classList.add('switch-out');
+    setTimeout(()=>prev.classList.remove('switch-out'),240);
+  }
   activeTab=tab;
   document.querySelectorAll('.tab-content').forEach(el=>{el.classList.remove('active');});
-  document.getElementById('tab-'+tab).classList.add('active');
+  const next=document.getElementById('tab-'+tab);
+  next.classList.add('active');
+  next.classList.remove('switch-in');
+  void next.offsetWidth;
+  next.classList.add('switch-in');
+  setTimeout(()=>next.classList.remove('switch-in'),360);
   document.querySelectorAll('nav button').forEach(b=>{
     b.classList.remove('text-blue-600','border-blue-600');
     b.classList.add('text-gray-400','border-transparent');
@@ -517,7 +583,7 @@ function gotoTab(tab){
   nb.classList.add('text-blue-600','border-blue-600');
 
   if(tab==='inventory')renderInv();
-  if(tab==='data'){refreshStats();refreshBtSelects();}
+  if(tab==='data'){refreshStats();refreshBtSelects();setTheme(currentTheme);}
   if(tab==='scanner')refreshScSelects();
   if(tab==='search'){document.getElementById('srch-input').value='';document.getElementById('srch-results').innerHTML='';document.getElementById('srch-placeholder').classList.remove('hidden');document.getElementById('srch-empty').classList.add('hidden');}
 }
@@ -1078,6 +1144,8 @@ function execReset(){
 }
 
 // ── INIT ──────────────────────────────────────────────────
+loadTheme();
+setTheme(currentTheme);
 load();
 loadCloudConfig();
 renderInv();
