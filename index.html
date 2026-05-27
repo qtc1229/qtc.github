@@ -542,6 +542,7 @@ function compactLayerAfterMoveOut(layer,removedPosition){
   if(!layer||!removed)return 0;
   let changed=0;
   layer.items.forEach(item=>{
+    if(item.status==='moved')return;
     const p=posNumber(item.position);
     if(p&&p>removed){
       item.position=String(p-1);
@@ -555,12 +556,22 @@ function moveOutItem(rowId,lid,iid){
   normalizeDb();
   const r=db.rows.find(r=>r.id===rowId);if(!r)return null;
   const l=r.layers.find(l=>l.id===lid);if(!l)return null;
-  const idx=l.items.findIndex(i=>i.id===iid);if(idx===-1)return null;
-  const item=l.items.splice(idx,1)[0];
+  const item=l.items.find(i=>i.id===iid);if(!item)return null;
+  if(item.status==='moved')return{item,shifted:0,alreadyMoved:true};
   const movedAt=now();
   const shifted=compactLayerAfterMoveOut(l,item.position);
-  db.todos=db.todos.filter(sn=>sn!==item.serialNumber);
-  db.movedItems.push({
+  Object.assign(item,{
+    status:'moved',
+    movedAt,
+    previousRowId:rowId,
+    previousLayerId:lid,
+    previousRowName:r.name,
+    previousLayerName:l.name,
+    previousPosition:item.position,
+    updatedAt:movedAt
+  });
+  if(!db.movedItems.find(x=>x.id===item.id)){
+    db.movedItems.push({
     ...item,
     movedAt,
     status:'moved',
@@ -570,7 +581,8 @@ function moveOutItem(rowId,lid,iid){
     previousLayerName:l.name,
     previousPosition:item.position,
     updatedAt:movedAt
-  });
+    });
+  }
   save();
   return{item,shifted};
 }
@@ -597,7 +609,10 @@ function allItems(){
 }
 function allMovedItems(){
   normalizeDb();
-  return db.movedItems.map(item=>({item,moved:true}));
+  const fromRows=allItems().filter(e=>e.item.status==='moved').map(e=>({...e,moved:true}));
+  const seen=new Set(fromRows.map(e=>e.item.id));
+  const legacy=db.movedItems.filter(item=>!seen.has(item.id)).map(item=>({item,moved:true}));
+  return fromRows.concat(legacy);
 }
 function findItemBySerial(sn){return allItems().find(e=>e.item.serialNumber===sn);}
 function isTodo(sn){normalizeDb();return db.todos.includes(sn);}
@@ -738,16 +753,17 @@ function renderItem(rowId,lid,item){
   const row=db.rows.find(r=>r.id===rowId);
   const layer=row&&row.layers.find(l=>l.id===lid);
   const loc=locationText(row,layer,item);
-  return`<div class="border border-gray-100 rounded-lg p-3 flex items-start justify-between bg-white fade-in" id="I${item.id}">
+  const moved=item.status==='moved';
+  return`<div class="border ${moved?'border-orange-100 bg-orange-50':'border-gray-100 bg-white'} rounded-lg p-3 flex items-start justify-between fade-in" id="I${item.id}">
   <div class="flex-1 min-w-0">
-    <div class="font-mono text-sm text-gray-800">${esc(item.serialNumber)}</div>
-    <div class="text-xs text-blue-600 mt-0.5">${loc}</div>
+    <div class="font-mono text-sm text-gray-800">${esc(item.serialNumber)}${moved?' <span class="ml-1 px-1.5 py-0.5 text-xs text-orange-600 bg-orange-100 rounded">已搬离</span>':''}</div>
+    <div class="text-xs ${moved?'text-orange-600':'text-blue-600'} mt-0.5">${moved?`原位置：${loc}`:loc}</div>
     <div class="text-xs text-gray-500 mt-0.5">${esc(item.name)}${item.notes?' · '+esc(item.notes):''}</div>
-    <div class="text-xs text-gray-300 mt-0.5">编辑: ${fmtDate(item.updatedAt)}</div>
+    <div class="text-xs text-gray-300 mt-0.5">${moved?'搬离':'编辑'}: ${fmtDate(moved?item.movedAt:item.updatedAt)}</div>
   </div>
   <div class="flex gap-1 ml-2 shrink-0">
     <button onclick="editItemModal('${rowId}','${lid}','${item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-blue-600 rounded">编辑</button>
-    <button onclick="moveOutItemConfirm('${rowId}','${lid}','${item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-orange-500 rounded">已搬离</button>
+    ${moved?'':`<button onclick="moveOutItemConfirm('${rowId}','${lid}','${item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-orange-500 rounded">已搬离</button>`}
     <button onclick="delItemConfirm('${rowId}','${lid}','${item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-red-500 rounded">删除</button>
   </div>
 </div>`;}
@@ -1060,7 +1076,7 @@ function moveOutItemConfirm(rowId,lid,iid){
       <p class="text-sm font-medium text-orange-700">标记为已搬离？</p>
       <p class="font-mono text-orange-800 mt-1">${esc(item.serialNumber)}</p>
       <p class="text-xs text-orange-500 mt-2">${esc(r.name)} &gt; ${esc(l.name)} &gt; ${pos}</p>
-      <p class="text-xs text-orange-400 mt-1">搬离后会从当前库存移除，并自动把同层后续机箱的位置号减 1。</p>
+      <p class="text-xs text-orange-400 mt-1">搬离后会保留在当前层并标记为已搬离，同时把同层后续在库机箱的位置号减 1。</p>
     </div>
     <div class="flex gap-3">
       <button onclick="closeModal()" class="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">取消</button>
@@ -1155,24 +1171,24 @@ function doSearch(){
   ph.classList.add('hidden');
   const lq=q.toLowerCase();
   const found=allItems().filter(e=>e.item.serialNumber.toLowerCase().includes(lq));
-  const moved=allMovedItems().filter(e=>e.item.serialNumber.toLowerCase().includes(lq));
+  const moved=allMovedItems().filter(e=>!e.row&&e.item.serialNumber.toLowerCase().includes(lq));
   const total=found.length+moved.length;
   if(!total){res.innerHTML='';emp.classList.remove('hidden');return;}
   emp.classList.add('hidden');
   res.innerHTML=found.map(e=>`
-    <div class="bg-white rounded-xl shadow-sm p-4 mb-3 fade-in">
+    <div class="bg-white rounded-xl shadow-sm p-4 mb-3 fade-in ${e.item.status==='moved'?'border border-orange-100':''}">
       <div class="flex items-start justify-between">
         <div class="flex-1">
-          <div class="font-mono font-medium text-gray-800">${hlMatch(e.item.serialNumber,q)}</div>
+          <div class="font-mono font-medium text-gray-800">${hlMatch(e.item.serialNumber,q)}${e.item.status==='moved'?' <span class="ml-1 px-1.5 py-0.5 text-xs text-orange-600 bg-orange-50 rounded">已搬离</span>':''}</div>
           <div class="text-sm text-gray-500 mt-1">${esc(e.item.name)}</div>
-          <div class="text-sm text-blue-600 mt-0.5">${locationText(e.row,e.layer,e.item)}</div>
+          <div class="text-sm ${e.item.status==='moved'?'text-orange-600':'text-blue-600'} mt-0.5">${e.item.status==='moved'?'原位置：':''}${locationText(e.row,e.layer,e.item)}</div>
           ${e.item.notes?`<div class="text-xs text-gray-400 mt-0.5">备注: ${esc(e.item.notes)}</div>`:''}
-          <div class="text-xs text-gray-300 mt-1">最后编辑: ${fmtDate(e.item.updatedAt)}</div>
+          <div class="text-xs text-gray-300 mt-1">${e.item.status==='moved'?'搬离':'最后编辑'}: ${fmtDate(e.item.status==='moved'?e.item.movedAt:e.item.updatedAt)}</div>
         </div>
         <div class="ml-2 flex flex-col gap-1 shrink-0">
           <button onclick="${isTodo(e.item.serialNumber)?`removeTodo('${jsArg(e.item.serialNumber)}')`:`addTodo('${jsArg(e.item.serialNumber)}')`}" class="px-2 py-1 text-xs ${isTodo(e.item.serialNumber)?'text-yellow-600 bg-yellow-50':'text-gray-400'} hover:text-yellow-600 rounded">${isTodo(e.item.serialNumber)?'已收藏':'收藏'}</button>
           <button onclick="editItemModal('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-blue-600 rounded">编辑</button>
-          <button onclick="moveOutItemConfirm('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-orange-500 rounded">已搬离</button>
+          ${e.item.status==='moved'?'':`<button onclick="moveOutItemConfirm('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-orange-500 rounded">已搬离</button>`}
         </div>
       </div>
     </div>`).join('')+moved.map(e=>`
@@ -1221,16 +1237,16 @@ function renderTodo(){
         </div>
       </div>`;
     }
-    return`<div class="bg-white rounded-xl shadow-sm p-4 mb-3 fade-in">
+    return`<div class="bg-white rounded-xl shadow-sm p-4 mb-3 fade-in ${e.item.status==='moved'?'border border-orange-100':''}">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="font-mono text-sm text-gray-800 break-all">${esc(e.item.serialNumber)}</div>
+          <div class="font-mono text-sm text-gray-800 break-all">${esc(e.item.serialNumber)}${e.item.status==='moved'?' <span class="ml-1 px-1.5 py-0.5 text-xs text-orange-600 bg-orange-50 rounded">已搬离</span>':''}</div>
           <div class="text-sm text-gray-500 mt-1">${esc(e.item.name)}</div>
-          <div class="text-sm text-blue-600 mt-0.5">${locationText(e.row,e.layer,e.item)}</div>
+          <div class="text-sm ${e.item.status==='moved'?'text-orange-600':'text-blue-600'} mt-0.5">${e.item.status==='moved'?'原位置：':''}${locationText(e.row,e.layer,e.item)}</div>
           ${e.item.notes?`<div class="text-xs text-gray-400 mt-0.5">备注: ${esc(e.item.notes)}</div>`:''}
         </div>
         <div class="flex flex-col gap-1 shrink-0">
-          <button onclick="moveOutItemConfirm('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-orange-500 hover:bg-orange-50 rounded">已搬离</button>
+          ${e.item.status==='moved'?'':`<button onclick="moveOutItemConfirm('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-orange-500 hover:bg-orange-50 rounded">已搬离</button>`}
           <button onclick="removeTodo('${jsArg(sn)}')" class="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded">移除</button>
         </div>
       </div>
