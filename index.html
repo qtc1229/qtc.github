@@ -1172,6 +1172,7 @@ function doSearch(){
         <div class="ml-2 flex flex-col gap-1 shrink-0">
           <button onclick="${isTodo(e.item.serialNumber)?`removeTodo('${jsArg(e.item.serialNumber)}')`:`addTodo('${jsArg(e.item.serialNumber)}')`}" class="px-2 py-1 text-xs ${isTodo(e.item.serialNumber)?'text-yellow-600 bg-yellow-50':'text-gray-400'} hover:text-yellow-600 rounded">${isTodo(e.item.serialNumber)?'已收藏':'收藏'}</button>
           <button onclick="editItemModal('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-blue-600 rounded">编辑</button>
+          <button onclick="moveOutItemConfirm('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-orange-500 rounded">已搬离</button>
         </div>
       </div>
     </div>`).join('')+moved.map(e=>`
@@ -1228,7 +1229,10 @@ function renderTodo(){
           <div class="text-sm text-blue-600 mt-0.5">${locationText(e.row,e.layer,e.item)}</div>
           ${e.item.notes?`<div class="text-xs text-gray-400 mt-0.5">备注: ${esc(e.item.notes)}</div>`:''}
         </div>
-        <button onclick="removeTodo('${jsArg(sn)}')" class="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded shrink-0">移除</button>
+        <div class="flex flex-col gap-1 shrink-0">
+          <button onclick="moveOutItemConfirm('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-orange-500 hover:bg-orange-50 rounded">已搬离</button>
+          <button onclick="removeTodo('${jsArg(sn)}')" class="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded">移除</button>
+        </div>
       </div>
     </div>`;
   }).join('');
