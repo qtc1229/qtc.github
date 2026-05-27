@@ -154,6 +154,21 @@ nav button.text-blue-600{transform:translateY(-2px) scale(1.04)}
     </div>
   </div>
 
+  <!-- TAB: 待办 -->
+  <div id="tab-todo" class="tab-content">
+    <div class="p-4">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-medium text-gray-600">待办机箱</span>
+        <span id="todo-count" class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">0 台</span>
+      </div>
+      <div id="todo-empty" class="hidden text-center py-16 text-gray-400">
+        <div class="text-4xl mb-2">✓</div>
+        <p class="text-sm">暂无待办，从搜索结果右侧收藏添加</p>
+      </div>
+      <div id="todo-list"></div>
+    </div>
+  </div>
+
   <!-- TAB: 数据 -->
   <div id="tab-data" class="tab-content">
     <div class="p-4 space-y-4">
@@ -233,7 +248,7 @@ nav button.text-blue-600{transform:translateY(-2px) scale(1.04)}
 
 <!-- Bottom Nav -->
 <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40">
-  <div class="max-w-lg mx-auto grid grid-cols-4">
+  <div class="max-w-lg mx-auto grid grid-cols-5">
     <button onclick="gotoTab('inventory')" id="nav-inventory" class="flex flex-col items-center py-2 text-blue-600 border-t-2 border-blue-600">
       <span class="text-lg font-bold">#</span><span class="text-xs mt-0.5 font-medium">库存</span>
     </button>
@@ -242,6 +257,9 @@ nav button.text-blue-600{transform:translateY(-2px) scale(1.04)}
     </button>
     <button onclick="gotoTab('search')" id="nav-search" class="flex flex-col items-center py-2 text-gray-400 border-t-2 border-transparent">
       <span class="text-lg">S</span><span class="text-xs mt-0.5">搜索</span>
+    </button>
+    <button onclick="gotoTab('todo')" id="nav-todo" class="flex flex-col items-center py-2 text-gray-400 border-t-2 border-transparent">
+      <span class="text-lg">★</span><span class="text-xs mt-0.5">待办</span>
     </button>
     <button onclick="gotoTab('data')" id="nav-data" class="flex flex-col items-center py-2 text-gray-400 border-t-2 border-transparent">
       <span class="text-lg">D</span><span class="text-xs mt-0.5">数据</span>
@@ -272,7 +290,7 @@ nav button.text-blue-600{transform:translateY(-2px) scale(1.04)}
 const KEY = 'chassis_v1';
 const CLOUD_CONFIG_KEY = 'chassis_cloud_config_v1';
 const THEME_KEY = 'chassis_theme_v1';
-let db = {rows:[]};
+let db = {rows:[],todos:[]};
 const CLOUD = {
   supabaseUrl: 'https://dgscqhlrzuexqvyutpap.supabase.co',
   supabaseAnonKey: 'sb_publishable_4O7dw6cfDA_IRc1Kpkkn6A_BUyNoRA0',
@@ -302,6 +320,7 @@ function setTheme(theme){
 function load(){
   if(!storageOK()){showStorageWarn();return;}
   try{const s=localStorage.getItem(KEY);if(s)db=JSON.parse(s);}catch(e){db={rows:[]};}
+  normalizeDb();
 }
 function loadCloudConfig(){
   if(!storageOK())return;
@@ -315,9 +334,11 @@ function saveLocalOnly(){
   try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){showStorageWarn();}
 }
 function save(){
+  normalizeDb();
   saveLocalOnly();
   queueCloudSave();
   refreshStats();
+  if(typeof activeTab!=='undefined'&&activeTab==='todo')renderTodo();
 }
 function showStorageWarn(){
   const el=document.getElementById('storage-warn');
@@ -351,8 +372,10 @@ async function initCloud(){
         return;
       }
       db=data.data;
+      normalizeDb();
       saveLocalOnly();
       renderInv();
+      renderTodo();
       refreshStats();
     }else{
       await saveCloudNow();
@@ -461,8 +484,10 @@ async function pullCloudNow(){
     if(error)throw error;
     if(!data||!data.data){toast('云端还没有数据，可先上传本地数据','err');setCloudStatus('无云端数据','err');return;}
     db=data.data;
+    normalizeDb();
     saveLocalOnly();
     renderInv();
+    renderTodo();
     refreshStats();
     cloudReady=true;
     setCloudStatus('已同步','ok');
@@ -484,6 +509,12 @@ function now(){return new Date().toISOString();}
 function fmtDate(s){if(!s)return'-';const d=new Date(s);return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;}
 function p2(n){return String(n).padStart(2,'0');}
 function chNum(n){return['一','二','三','四','五','六','七','八','九','十'][n]||String(n+1);}
+function normalizeDb(){
+  if(!db||typeof db!=='object')db={rows:[],todos:[]};
+  if(!Array.isArray(db.rows))db.rows=[];
+  if(!Array.isArray(db.todos))db.todos=[];
+  db.todos=[...new Set(db.todos.map(s=>String(s||'').trim()).filter(Boolean))];
+}
 
 function addRow(name){const r={id:uid(),name,layers:[]};db.rows.push(r);save();return r;}
 function delRow(id){db.rows=db.rows.filter(r=>r.id!==id);save();}
@@ -500,7 +531,7 @@ function addItem(rowId,layerId,sn,notes='',itemName='机箱',position=''){
   const item={id:uid(),serialNumber:sn,name:itemName,position,notes,createdAt:now(),updatedAt:now()};
   l.items.push(item);save();return item;
 }
-function delItem(rowId,lid,iid){const r=db.rows.find(r=>r.id===rowId);if(!r)return;const l=r.layers.find(l=>l.id===lid);if(l){l.items=l.items.filter(i=>i.id!==iid);save();}}
+function delItem(rowId,lid,iid){const r=db.rows.find(r=>r.id===rowId);if(!r)return;const l=r.layers.find(l=>l.id===lid);if(l){const item=l.items.find(i=>i.id===iid);l.items=l.items.filter(i=>i.id!==iid);if(item)db.todos=db.todos.filter(sn=>sn!==item.serialNumber);save();}}
 function updItem(rowId,lid,iid,data){
   const r=db.rows.find(r=>r.id===rowId);if(!r)return;
   const l=r.layers.find(l=>l.id===lid);if(!l)return;
@@ -522,10 +553,28 @@ function allItems(){
   db.rows.forEach(row=>row.layers.forEach(layer=>layer.items.forEach(item=>out.push({row,layer,item}))));
   return out;
 }
+function findItemBySerial(sn){return allItems().find(e=>e.item.serialNumber===sn);}
+function isTodo(sn){normalizeDb();return db.todos.includes(sn);}
+function addTodo(sn){
+  normalizeDb();
+  if(!sn)return;
+  if(!db.todos.includes(sn)){db.todos.push(sn);save();toast('已加入待办');}
+  if(activeTab==='search')doSearch();
+  renderTodo();
+}
+function removeTodo(sn){
+  normalizeDb();
+  db.todos=db.todos.filter(s=>s!==sn);
+  save();
+  if(activeTab==='search')doSearch();
+  renderTodo();
+  toast('已移出待办');
+}
 function stats(){let la=0,it=0;db.rows.forEach(r=>{la+=r.layers.length;r.layers.forEach(l=>it+=l.items.length);});return{rows:db.rows.length,layers:la,items:it};}
 
 // ── UI HELPERS ─────────────────────────────────────────────
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function jsArg(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n').replace(/\r/g,'');}
 function positionText(pos){return pos?`第${esc(pos)}个`:'';}
 function locationText(row,layer,item){
   return [row&&row.name,layer&&layer.name,positionText(item&&item.position)].filter(Boolean).map(esc).join(' > ');
@@ -585,6 +634,7 @@ function gotoTab(tab){
   if(tab==='inventory')renderInv();
   if(tab==='data'){refreshStats();refreshBtSelects();setTheme(currentTheme);}
   if(tab==='scanner')refreshScSelects();
+  if(tab==='todo')renderTodo();
   if(tab==='search'){document.getElementById('srch-input').value='';document.getElementById('srch-results').innerHTML='';document.getElementById('srch-placeholder').classList.remove('hidden');document.getElementById('srch-empty').classList.add('hidden');}
 }
 
@@ -911,6 +961,7 @@ function submitEditItem(origRowId,origLid,iid){
   const nt=document.getElementById('m-ent').value.trim();
   if(!sn){toast('序列号不能为空','err');return;}
   if(!newLid){toast('请选择层','err');return;}
+  const oldSn=item.serialNumber;
   const dup=allItems().find(e=>e.item.serialNumber===sn&&e.item.id!==iid);
   if(dup){toast('该序列号已存在！','err');return;}
   if(newRowId===origRowId&&newLid===origLid){
@@ -929,6 +980,10 @@ function submitEditItem(origRowId,origLid,iid){
         save();
       }
     }
+  }
+  if(oldSn!==sn&&db.todos.includes(oldSn)){
+    db.todos=db.todos.map(s=>s===oldSn?sn:s);
+    save();
   }
   closeModal();renderInv();toast('已更新');
 }
@@ -1039,13 +1094,57 @@ function doSearch(){
           ${e.item.notes?`<div class="text-xs text-gray-400 mt-0.5">备注: ${esc(e.item.notes)}</div>`:''}
           <div class="text-xs text-gray-300 mt-1">最后编辑: ${fmtDate(e.item.updatedAt)}</div>
         </div>
-        <button onclick="editItemModal('${e.row.id}','${e.layer.id}','${e.item.id}')" class="ml-2 px-2 py-1 text-xs text-gray-400 hover:text-blue-600 rounded">编辑</button>
+        <div class="ml-2 flex flex-col gap-1 shrink-0">
+          <button onclick="${isTodo(e.item.serialNumber)?`removeTodo('${jsArg(e.item.serialNumber)}')`:`addTodo('${jsArg(e.item.serialNumber)}')`}" class="px-2 py-1 text-xs ${isTodo(e.item.serialNumber)?'text-yellow-600 bg-yellow-50':'text-gray-400'} hover:text-yellow-600 rounded">${isTodo(e.item.serialNumber)?'已收藏':'收藏'}</button>
+          <button onclick="editItemModal('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-blue-600 rounded">编辑</button>
+        </div>
       </div>
     </div>`).join('');
 }
 function hlMatch(text,q){
   const s=esc(text);const qe=esc(q);
-  return s.replace(new RegExp(qe,'gi'),m=>`<mark>${m}</mark>`);
+  return s.replace(new RegExp(qe.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'),m=>`<mark>${m}</mark>`);
+}
+
+// ── TODO ──────────────────────────────────────────────────
+function renderTodo(){
+  normalizeDb();
+  const list=document.getElementById('todo-list');
+  const empty=document.getElementById('todo-empty');
+  const count=document.getElementById('todo-count');
+  if(count)count.textContent=db.todos.length+' 台';
+  if(!list||!empty)return;
+  if(!db.todos.length){
+    list.innerHTML='';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  list.innerHTML=db.todos.map(sn=>{
+    const e=findItemBySerial(sn);
+    if(!e){
+      return`<div class="bg-white rounded-xl shadow-sm p-4 mb-3 fade-in border border-red-100">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="font-mono text-sm text-gray-800 break-all">${esc(sn)}</div>
+            <div class="text-xs text-red-500 mt-1">库存中不存在，可能已被删除</div>
+          </div>
+          <button onclick="removeTodo('${jsArg(sn)}')" class="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded shrink-0">移除</button>
+        </div>
+      </div>`;
+    }
+    return`<div class="bg-white rounded-xl shadow-sm p-4 mb-3 fade-in">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="font-mono text-sm text-gray-800 break-all">${esc(e.item.serialNumber)}</div>
+          <div class="text-sm text-gray-500 mt-1">${esc(e.item.name)}</div>
+          <div class="text-sm text-blue-600 mt-0.5">${locationText(e.row,e.layer,e.item)}</div>
+          ${e.item.notes?`<div class="text-xs text-gray-400 mt-0.5">备注: ${esc(e.item.notes)}</div>`:''}
+        </div>
+        <button onclick="removeTodo('${jsArg(sn)}')" class="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded shrink-0">移除</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // ── DATA TAB ──────────────────────────────────────────────
@@ -1056,6 +1155,7 @@ function refreshStats(){
   if(g('st-layers'))g('st-layers').textContent=s.layers;
   if(g('st-items'))g('st-items').textContent=s.items;
   if(g('hd-count'))g('hd-count').textContent=s.items+' 台';
+  if(g('todo-count'))g('todo-count').textContent=(db.todos?db.todos.length:0)+' 台';
 }
 function refreshBtSelects(){
   const rs=document.getElementById('bt-row');if(!rs)return;
@@ -1149,6 +1249,7 @@ setTheme(currentTheme);
 load();
 loadCloudConfig();
 renderInv();
+renderTodo();
 refreshStats();
 initCloud();
 </script>
