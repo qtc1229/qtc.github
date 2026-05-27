@@ -509,12 +509,34 @@ function now(){return new Date().toISOString();}
 function fmtDate(s){if(!s)return'-';const d=new Date(s);return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;}
 function p2(n){return String(n).padStart(2,'0');}
 function chNum(n){return['一','二','三','四','五','六','七','八','九','十'][n]||String(n+1);}
+function migrateLegacyMovedItems(){
+  if(!Array.isArray(db.movedItems)||!Array.isArray(db.rows))return;
+  db.movedItems.forEach(moved=>{
+    if(!moved||!moved.id)return;
+    let exists=false;
+    db.rows.forEach(row=>row.layers&&row.layers.forEach(layer=>{
+      if(layer.items&&layer.items.find(item=>item.id===moved.id||item.serialNumber===moved.serialNumber))exists=true;
+    }));
+    if(exists)return;
+    const row=db.rows.find(r=>r.id===moved.previousRowId);
+    const layer=row&&row.layers&&row.layers.find(l=>l.id===moved.previousLayerId);
+    if(!layer)return;
+    if(!Array.isArray(layer.items))layer.items=[];
+    layer.items.push({
+      ...moved,
+      status:'moved',
+      position:moved.previousPosition||moved.position||'',
+      updatedAt:moved.updatedAt||moved.movedAt||now()
+    });
+  });
+}
 function normalizeDb(){
   if(!db||typeof db!=='object')db={rows:[],todos:[]};
   if(!Array.isArray(db.rows))db.rows=[];
   if(!Array.isArray(db.todos))db.todos=[];
   if(!Array.isArray(db.movedItems))db.movedItems=[];
   db.todos=[...new Set(db.todos.map(s=>String(s||'').trim()).filter(Boolean))];
+  migrateLegacyMovedItems();
 }
 
 function addRow(name){const r={id:uid(),name,layers:[]};db.rows.push(r);save();return r;}
