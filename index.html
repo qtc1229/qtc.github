@@ -1063,6 +1063,8 @@ function confirmReset(){
     </div>
     <input id="m-confirm" type="text" placeholder="输入「确认重置」继续"
       class="w-full border border-red-200 rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-red-400">
+    <input id="m-reset-pass" type="password" inputmode="numeric" placeholder="输入重置密码"
+      class="w-full border border-red-200 rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-red-400">
     <div class="flex gap-3">
       <button onclick="closeModal()" class="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">取消</button>
       <button onclick="execReset()" class="flex-1 py-3 bg-red-600 text-white rounded-xl text-sm font-medium">重置</button>
@@ -1071,6 +1073,7 @@ function confirmReset(){
 }
 function execReset(){
   if(document.getElementById('m-confirm').value.trim()!=='确认重置'){toast('请输入「确认重置」','err');return;}
+  if(document.getElementById('m-reset-pass').value.trim()!=='1229'){toast('重置密码错误','err');return;}
   db={rows:[]};save();closeModal();renderInv();toast('已重置','err');
 }
 
