@@ -513,6 +513,7 @@ function normalizeDb(){
   if(!db||typeof db!=='object')db={rows:[],todos:[]};
   if(!Array.isArray(db.rows))db.rows=[];
   if(!Array.isArray(db.todos))db.todos=[];
+  if(!Array.isArray(db.movedItems))db.movedItems=[];
   db.todos=[...new Set(db.todos.map(s=>String(s||'').trim()).filter(Boolean))];
 }
 
@@ -532,6 +533,47 @@ function addItem(rowId,layerId,sn,notes='',itemName='机箱',position=''){
   l.items.push(item);save();return item;
 }
 function delItem(rowId,lid,iid){const r=db.rows.find(r=>r.id===rowId);if(!r)return;const l=r.layers.find(l=>l.id===lid);if(l){const item=l.items.find(i=>i.id===iid);l.items=l.items.filter(i=>i.id!==iid);if(item)db.todos=db.todos.filter(sn=>sn!==item.serialNumber);save();}}
+function posNumber(pos){
+  const n=parseInt(String(pos||'').trim(),10);
+  return Number.isFinite(n)&&n>0?n:null;
+}
+function compactLayerAfterMoveOut(layer,removedPosition){
+  const removed=posNumber(removedPosition);
+  if(!layer||!removed)return 0;
+  let changed=0;
+  layer.items.forEach(item=>{
+    const p=posNumber(item.position);
+    if(p&&p>removed){
+      item.position=String(p-1);
+      item.updatedAt=now();
+      changed++;
+    }
+  });
+  return changed;
+}
+function moveOutItem(rowId,lid,iid){
+  normalizeDb();
+  const r=db.rows.find(r=>r.id===rowId);if(!r)return null;
+  const l=r.layers.find(l=>l.id===lid);if(!l)return null;
+  const idx=l.items.findIndex(i=>i.id===iid);if(idx===-1)return null;
+  const item=l.items.splice(idx,1)[0];
+  const movedAt=now();
+  const shifted=compactLayerAfterMoveOut(l,item.position);
+  db.todos=db.todos.filter(sn=>sn!==item.serialNumber);
+  db.movedItems.push({
+    ...item,
+    movedAt,
+    status:'moved',
+    previousRowId:rowId,
+    previousLayerId:lid,
+    previousRowName:r.name,
+    previousLayerName:l.name,
+    previousPosition:item.position,
+    updatedAt:movedAt
+  });
+  save();
+  return{item,shifted};
+}
 function updItem(rowId,lid,iid,data){
   const r=db.rows.find(r=>r.id===rowId);if(!r)return;
   const l=r.layers.find(l=>l.id===lid);if(!l)return;
@@ -552,6 +594,10 @@ function allItems(){
   const out=[];
   db.rows.forEach(row=>row.layers.forEach(layer=>layer.items.forEach(item=>out.push({row,layer,item}))));
   return out;
+}
+function allMovedItems(){
+  normalizeDb();
+  return db.movedItems.map(item=>({item,moved:true}));
 }
 function findItemBySerial(sn){return allItems().find(e=>e.item.serialNumber===sn);}
 function isTodo(sn){normalizeDb();return db.todos.includes(sn);}
@@ -701,6 +747,7 @@ function renderItem(rowId,lid,item){
   </div>
   <div class="flex gap-1 ml-2 shrink-0">
     <button onclick="editItemModal('${rowId}','${lid}','${item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-blue-600 rounded">编辑</button>
+    <button onclick="moveOutItemConfirm('${rowId}','${lid}','${item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-orange-500 rounded">已搬离</button>
     <button onclick="delItemConfirm('${rowId}','${lid}','${item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-red-500 rounded">删除</button>
   </div>
 </div>`;}
@@ -1003,6 +1050,32 @@ function delItemConfirm(rowId,lid,iid){
   </div>`);
 }
 function execDelItem(rowId,lid,iid){delItem(rowId,lid,iid);closeModal();renderInv();toast('已删除','err');}
+function moveOutItemConfirm(rowId,lid,iid){
+  const r=db.rows.find(r=>r.id===rowId);if(!r)return;
+  const l=r.layers.find(l=>l.id===lid);if(!l)return;
+  const item=l.items.find(i=>i.id===iid);if(!item)return;
+  const pos=positionText(item.position)||'未填写位置';
+  showModal('确认搬离',`<div class="space-y-4">
+    <div class="bg-orange-50 border border-orange-200 rounded-xl p-4">
+      <p class="text-sm font-medium text-orange-700">标记为已搬离？</p>
+      <p class="font-mono text-orange-800 mt-1">${esc(item.serialNumber)}</p>
+      <p class="text-xs text-orange-500 mt-2">${esc(r.name)} &gt; ${esc(l.name)} &gt; ${pos}</p>
+      <p class="text-xs text-orange-400 mt-1">搬离后会从当前库存移除，并自动把同层后续机箱的位置号减 1。</p>
+    </div>
+    <div class="flex gap-3">
+      <button onclick="closeModal()" class="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">取消</button>
+      <button onclick="execMoveOutItem('${rowId}','${lid}','${iid}')" class="flex-1 py-3 bg-orange-500 text-white rounded-xl text-sm font-medium">确认搬离</button>
+    </div>
+  </div>`);
+}
+function execMoveOutItem(rowId,lid,iid){
+  const result=moveOutItem(rowId,lid,iid);
+  if(!result){toast('搬离失败','err');return;}
+  closeModal();renderInv();
+  if(activeTab==='search')doSearch();
+  renderTodo();
+  toast(`已搬离，后续 ${result.shifted} 台已前移`);
+}
 
 // ── SCANNER ───────────────────────────────────────────────
 let qr=null;
@@ -1082,7 +1155,9 @@ function doSearch(){
   ph.classList.add('hidden');
   const lq=q.toLowerCase();
   const found=allItems().filter(e=>e.item.serialNumber.toLowerCase().includes(lq));
-  if(!found.length){res.innerHTML='';emp.classList.remove('hidden');return;}
+  const moved=allMovedItems().filter(e=>e.item.serialNumber.toLowerCase().includes(lq));
+  const total=found.length+moved.length;
+  if(!total){res.innerHTML='';emp.classList.remove('hidden');return;}
   emp.classList.add('hidden');
   res.innerHTML=found.map(e=>`
     <div class="bg-white rounded-xl shadow-sm p-4 mb-3 fade-in">
@@ -1098,6 +1173,18 @@ function doSearch(){
           <button onclick="${isTodo(e.item.serialNumber)?`removeTodo('${jsArg(e.item.serialNumber)}')`:`addTodo('${jsArg(e.item.serialNumber)}')`}" class="px-2 py-1 text-xs ${isTodo(e.item.serialNumber)?'text-yellow-600 bg-yellow-50':'text-gray-400'} hover:text-yellow-600 rounded">${isTodo(e.item.serialNumber)?'已收藏':'收藏'}</button>
           <button onclick="editItemModal('${e.row.id}','${e.layer.id}','${e.item.id}')" class="px-2 py-1 text-xs text-gray-400 hover:text-blue-600 rounded">编辑</button>
         </div>
+      </div>
+    </div>`).join('')+moved.map(e=>`
+    <div class="bg-white rounded-xl shadow-sm p-4 mb-3 fade-in border border-orange-100">
+      <div class="flex items-start justify-between">
+        <div class="flex-1 min-w-0">
+          <div class="font-mono font-medium text-gray-800">${hlMatch(e.item.serialNumber,q)}</div>
+          <div class="text-sm text-gray-500 mt-1">${esc(e.item.name)}</div>
+          <div class="text-sm text-orange-600 mt-0.5">已搬离 · 原位置：${esc(e.item.previousRowName||'-')} &gt; ${esc(e.item.previousLayerName||'-')}${e.item.previousPosition?` &gt; 第${esc(e.item.previousPosition)}个`:''}</div>
+          ${e.item.notes?`<div class="text-xs text-gray-400 mt-0.5">备注: ${esc(e.item.notes)}</div>`:''}
+          <div class="text-xs text-gray-300 mt-1">搬离: ${fmtDate(e.item.movedAt)}</div>
+        </div>
+        <span class="ml-2 px-2 py-1 text-xs text-orange-600 bg-orange-50 rounded shrink-0">已搬离</span>
       </div>
     </div>`).join('');
 }
