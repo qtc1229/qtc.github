@@ -41,3 +41,33 @@ jobs:
           fi
 
           echo "Supabase inventory database is reachable."
+
+  keep-schedule-enabled:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Record monthly repository activity
+        run: |
+          if [[ "$(date -u +%d-%H)" != "01-01" ]]; then
+            echo "Monthly repository heartbeat is not due."
+            exit 0
+          fi
+
+          printf 'Last automated activity: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > .github/keepalive-heartbeat.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive-heartbeat.txt
+
+          if git diff --cached --quiet; then
+            echo "Heartbeat is already current."
+            exit 0
+          fi
+
+          git commit -m "Keep scheduled inventory checks enabled"
+          git push
