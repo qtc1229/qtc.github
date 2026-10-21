@@ -1,0 +1,43 @@
+name: Keep Supabase Awake
+
+on:
+  schedule:
+    # Supabase recommends a few database requests each day for inactive Free projects.
+    - cron: "17 1,7,13,19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keep-supabase-awake
+  cancel-in-progress: true
+
+jobs:
+  ping-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query the inventory document
+        env:
+          SUPABASE_URL: https://dgscqhlrzuexqvyutpap.supabase.co
+          SUPABASE_KEY: sb_publishable_4O7dw6cfDA_IRc1Kpkkn6A_BUyNoRA0
+        run: |
+          response="$(curl --fail --silent --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 10 \
+            --get "$SUPABASE_URL/rest/v1/inventory_state" \
+            --data-urlencode "id=eq.default" \
+            --data-urlencode "select=id" \
+            --data-urlencode "limit=1" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "Cache-Control: no-cache")"
+
+          if [[ "$response" != *'"id":"default"'* ]]; then
+            echo "Inventory document was not returned: $response" >&2
+            exit 1
+          fi
+
+          echo "Supabase inventory database is reachable."
